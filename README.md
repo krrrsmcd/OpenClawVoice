@@ -1,28 +1,16 @@
 # OpenClaw Voice
 
-Message a URL to OpenClaw, get a narrated podcast episode in your private feed.
-Built to run inside the OpenClaw runtime (Node.js, macOS).
+Turn a web article into a narrated podcast episode in your own private feed —
+so you can listen on your phone with the screen locked.
 
-See `openclaw-voice-spec.md` and `openclaw-voice-build-plan.md` for the full design and staged plan.
+A standalone Node.js CLI that runs the whole pipeline: extract the article text,
+narrate it with ElevenLabs, upload the audio to Cloudflare R2, and publish a
+private RSS feed you subscribe to in any podcast app. Use it straight from the
+terminal, or install the included [OpenClaw](https://openclaw.ai) skill to
+trigger it by sending a URL in Telegram.
 
-## Repo safety (secrets never get committed)
-
-No tracked file contains real credentials, URLs, or paths — everything
-environment-specific lives in `.env`, which is gitignored. A pre-commit hook
-enforces this. Enable it once after cloning:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-It blocks any commit that stages an `.env` file or contains a real R2 bucket
-URL, ElevenLabs key, or personal home path. Use placeholders in docs
-(`/absolute/path/to/openclaw-voice`, `https://pub-xxxx.r2.dev`).
-
-## Requirements
-
-- Node.js ≥ 22 (tested on the runtime's v24; `--env-file` support required)
-- Accounts: ElevenLabs, Cloudflare R2
+See [`docs/spec.md`](docs/spec.md) and [`docs/build-plan.md`](docs/build-plan.md)
+for the full design and staged build plan.
 
 ## Setup
 
