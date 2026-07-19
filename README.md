@@ -14,16 +14,51 @@ for the full design and staged build plan.
 
 ## Setup
 
-1. Copy the env template and fill in your real values:
+### What you need first
+
+This will not run without accounts on two paid-ish services — **ElevenLabs**
+(text-to-speech) and **Cloudflare R2** (object storage for the audio and feed).
+Both are quick to create, and R2's free tier easily covers personal use.
+
+| Requirement | Notes |
+|---|---|
+| **ElevenLabs account** | Provides the voice. Free tier is ~10,000 characters/month (roughly one article); paid tiers start around $5/mo. |
+| **Cloudflare R2 account** | Hosts the MP3s and the RSS feed. Create a bucket and enable its public URL. Free tier is ample; no egress fees. |
+| **Node.js ≥ 22** | Requires built-in `--env-file` support. Tested on v24. |
+| **ffmpeg** *(recommended)* | Used to stitch audio chunks cleanly. Without it there's a working fallback, but joins are slightly rougher. macOS: `brew install ffmpeg`. |
+| **A podcast app** | Anything that accepts a feed URL — Apple Podcasts, Overcast, etc. This is what gives you lock-screen playback. |
+
+### Steps
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Copy the env template and fill in your values:
 
    ```bash
    cp .env.example .env
    ```
 
-   Fill in: ElevenLabs API key + voice ID, and R2 account ID, access key, secret,
-   bucket, and public base URL. (`.env` is gitignored — never commit it.)
+   `.env` is gitignored — never commit it. The seven required values:
 
-2. Verify everything loads:
+   | Variable | Where to get it |
+   |---|---|
+   | `ELEVENLABS_API_KEY` | ElevenLabs → Developers → API Keys → Create Key (shown once) |
+   | `ELEVENLABS_VOICE_ID` | ElevenLabs → Voices → My Voices → ⋮ → Copy Voice ID |
+   | `R2_ACCOUNT_ID` | Cloudflare → R2 → Overview → **Account ID** (32-char hex; *not* the `pub-…` hash in your public URL) |
+   | `R2_ACCESS_KEY_ID` | R2 → Manage R2 API Tokens → Create API Token (**Object Read & Write**) |
+   | `R2_SECRET_ACCESS_KEY` | Same token screen (shown once) |
+   | `R2_BUCKET` | Your bucket name, e.g. `openclaw-voice` |
+   | `R2_PUBLIC_BASE_URL` | R2 bucket → Settings → Public Access, e.g. `https://pub-xxxx.r2.dev` (no trailing slash) |
+
+   Tip: create the API token first — that screen shows the access key, the
+   secret, and the S3 endpoint containing your account ID all at once, so the
+   three values are guaranteed to match.
+
+3. Verify everything loads:
 
    ```bash
    npm run check-config
