@@ -21,6 +21,10 @@ export const TTS_DEFAULTS = {
 /**
  * Split `text` into chunks no longer than `maxChars`, preferring paragraph
  * boundaries, then sentence boundaries, then (last resort) word boundaries.
+ *
+ * Guarantees losslessness: every non-whitespace character of `text` appears in
+ * the returned chunks, in order. Violations throw rather than passing silently
+ * truncated text to the TTS API.
  * @returns {string[]}
  */
 export function chunkText(text, maxChars = TTS_DEFAULTS.maxChars) {
@@ -51,12 +55,21 @@ export function chunkText(text, maxChars = TTS_DEFAULTS.maxChars) {
     else cur = candidate;
   }
   flush();
+
+  assertLossless(clean, chunks);
   return chunks;
 }
 
+// Sentence segmentation via Intl.Segmenter (built into Node 22). Unlike a regex
+// scan, it partitions the input exhaustively — there is no way for a span to
+// fall between two matches and disappear. The previous regex required terminal
+// punctuation to be followed by whitespace, so text glued together like
+// "...of AI.Context, domain..." silently lost everything up to the next match.
+const SENTENCE_SEGMENTER = new Intl.Segmenter('en', { granularity: 'sentence' });
+
 /** Break an over-long paragraph into <=maxChars pieces by sentence, then words. */
 function splitLongUnit(text, maxChars) {
-  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [text];
+  const sentences = [...SENTENCE_SEGMENTER.segment(text)].map((s) => s.segment);
   const out = [];
   for (const raw of sentences) {
     const s = raw.trim();
@@ -75,6 +88,29 @@ function splitLongUnit(text, maxChars) {
     }
   }
   return out;
+}
+
+/**
+ * Guard against silent text loss: the chunks, concatenated, must contain exactly
+ * the same non-whitespace characters as the input. Chunking is allowed to change
+ * whitespace (it trims and re-joins) but never to drop content.
+ * @throws {Error} with the first divergence point when characters go missing.
+ */
+export function assertLossless(input, chunks) {
+  const strip = (s) => s.replace(/\s+/g, '');
+  const want = strip(input);
+  const got = strip(chunks.join(' '));
+  if (want === got) return;
+
+  let i = 0;
+  while (i < want.length && i < got.length && want[i] === got[i]) i++;
+  const missing = want.length - got.length;
+  throw new Error(
+    `chunkText dropped text: expected ${want.length} non-space chars, produced ${got.length} ` +
+      `(${missing > 0 ? `${missing} missing` : `${-missing} extra`}). ` +
+      `First divergence at char ${i}: expected "${want.slice(i, i + 60)}…" ` +
+      `but got "${got.slice(i, i + 60)}…"`,
+  );
 }
 
 // ---------------------------------------------------------------------------
