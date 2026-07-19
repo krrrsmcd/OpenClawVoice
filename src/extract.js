@@ -67,7 +67,7 @@ export function parseArticle(html, url) {
     throw new Error('could not extract an article from this page (no readable content found)');
   }
 
-  const body = normalizeWhitespace(article.textContent || '');
+  const body = normalizeWhitespace(blockText(article.content || ''));
   if (body.length < MIN_BODY_CHARS) {
     throw new Error(
       `extracted text too short (${body.length} chars) — likely a paywall, login wall, or non-article page`,
@@ -98,8 +98,42 @@ export function looksReadable(html, url) {
 
 // --- helpers ---------------------------------------------------------------
 
+// Block-level elements that should produce a paragraph break in the spoken
+// script. Readability's `textContent` concatenates these with no separator at
+// all, which glues sentences together ("...of AI.Context, domain...") and
+// leaves the narration with a single unbroken paragraph — no pauses, and a
+// sentence splitter downstream that can silently drop text. Reading
+// `article.content` (HTML) and inserting the breaks ourselves preserves the
+// document's structure.
+const BLOCK_SELECTORS = [
+  'p', 'div', 'section', 'article', 'main', 'aside',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'li', 'dt', 'dd', 'blockquote', 'pre', 'figure',
+  'tr', 'th', 'td', 'hr', 'table', 'ul', 'ol', 'dl',
+].join(', ');
+
+/**
+ * Convert Readability's article HTML into plain text that keeps block
+ * boundaries as blank lines. `<br>` becomes a single newline.
+ */
+export function blockText(contentHtml) {
+  if (!contentHtml) return '';
+  const doc = new JSDOM(`<body>${contentHtml}</body>`).window.document;
+
+  for (const br of doc.querySelectorAll('br')) {
+    br.replaceWith(doc.createTextNode('\n'));
+  }
+  // Append a break marker inside each block so nested blocks stay separated.
+  for (const el of doc.querySelectorAll(BLOCK_SELECTORS)) {
+    el.append(doc.createTextNode('\n\n'));
+  }
+  return doc.body.textContent || '';
+}
+
 // Selectors for image/figure captions across common CMSes and Wikipedia.
 // Removed before Readability runs so caption text never reaches the narration.
+// Deliberately specific: a broad [class*="caption"] match also deletes real
+// article content on sites that use "caption" in unrelated class names.
 const CAPTION_SELECTORS = [
   'figcaption',
   '.thumbcaption', // Wikipedia (legacy)
@@ -107,7 +141,6 @@ const CAPTION_SELECTORS = [
   '.image-caption',
   '.photo-caption',
   '.media-caption',
-  '[class*="caption" i]',
   '[itemprop="caption"]',
 ].join(', ');
 

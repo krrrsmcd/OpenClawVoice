@@ -70,4 +70,112 @@ test('full article with intro reads cleanly end to end', () => {
   assert.match(out, /Final thought\.$/);
 });
 
+// --- math -------------------------------------------------------------------
+
+test('a LaTeX fraction is spoken as numerator and denominator', () => {
+  const out = normalizeScript({
+    body:
+      'Here is the model.\n\n' +
+      '\\(\\text{Success} = \\frac{\\text{Machine Understanding} \\times \\text{Problem Understanding}}{\\text{Social Contract}}\\)\n\n' +
+      'And the rest of it.',
+  }, { intro: false });
+
+  assert.doesNotMatch(out, /\\text|\\frac|\\\(|\\\)|[{}]/);
+  assert.match(out, /Success equals the following\./);
+  assert.match(out, /The numerator is machine understanding times problem understanding\./);
+  assert.match(out, /The denominator is social contract\./);
+  assert.match(out, /Here is the model\./);
+  assert.match(out, /And the rest of it\./);
+});
+
+test('unverbalizable math is dropped rather than read as symbols', () => {
+  const out = normalizeScript({ body: 'Before.\n\n\\(x^2 + \\beta_1\\)\n\nAfter.' }, { intro: false });
+  assert.doesNotMatch(out, /\^|_|beta|\\/);
+  assert.match(out, /Before\./);
+  assert.match(out, /After\./);
+});
+
+test('display math with $$ is verbalized too', () => {
+  const out = normalizeScript({ body: 'Before.\n\n$$\\text{A} = \\text{B}$$\n\nAfter.' }, { intro: false });
+  assert.doesNotMatch(out, /\$\$/);
+  assert.match(out, /A equals the following\. B\./i);
+});
+
+test('ordinary prices are NOT mangled by the math rule', () => {
+  const out = normalizeScript(
+    { body: 'The plan costs $5 per month, or $50 a year if you pay up front.' },
+    { intro: false },
+  );
+  assert.match(out, /\$5 per month/);
+  assert.match(out, /\$50 a year/);
+});
+
+// --- symbols ----------------------------------------------------------------
+
+test('multiplication signs are spoken as words', () => {
+  const out = normalizeScript({ body: 'The numerator is Machine × Problem × Practice in this model.' }, { intro: false });
+  assert.match(out, /Machine times Problem times Practice/);
+  assert.doesNotMatch(out, /×/);
+});
+
+test('a standalone formula line is lowercased so it flows', () => {
+  const out = normalizeScript(
+    { body: 'Machine × No Problem Understanding × Practice\nFast iteration in the wrong direction.' },
+    { intro: false },
+  );
+  // Sentence-initial capital kept; interior terms lowercased for a shorter beat.
+  assert.match(out, /^Machine times no problem understanding times practice\./m);
+});
+
+test('prose containing "times" is never lowercased', () => {
+  const out = normalizeScript(
+    { body: 'I told Bob three times Monday that The New York Times had covered it.' },
+    { intro: false },
+  );
+  assert.match(out, /I told Bob three times Monday/);
+  assert.match(out, /The New York Times/);
+});
+
+// --- pauses -----------------------------------------------------------------
+
+test('a short label line gets terminal punctuation so TTS pauses', () => {
+  const out = normalizeScript(
+    { body: 'Machine × No Problem Understanding\nFast iteration in the wrong direction.' },
+    { intro: false },
+  );
+  assert.match(out, /Machine times no problem understanding\.\nFast iteration/);
+});
+
+test('a mid-sentence line wrap is left alone', () => {
+  const long = 'This is a genuinely long clause that simply wrapped across a line break in the source markup and should not be broken';
+  const out = normalizeScript({ body: `${long}\ninto two separate sentences by the normalizer.` }, { intro: false });
+  assert.doesNotMatch(out, /be broken\./);
+});
+
+test('every paragraph ends with terminal punctuation', () => {
+  const out = normalizeScript({ body: 'A heading\n\nSome body text here.\n\nAnother heading' }, { intro: false });
+  for (const p of out.split(/\n{2,}/)) {
+    assert.match(p, /[.!?:"'”’)]$/, `paragraph lacks terminal punctuation: ${p}`);
+  }
+});
+
+// --- boilerplate ------------------------------------------------------------
+
+test('substack footer boilerplate is dropped', () => {
+  const out = normalizeScript(
+    { body: 'Real closing paragraph of the article.\n\nDiscussion about this post\n\nReady for more?\n\nLeave a comment' },
+    { intro: false },
+  );
+  assert.doesNotMatch(out, /Discussion about this post|Ready for more|Leave a comment/i);
+  assert.match(out, /Real closing paragraph/);
+});
+
+test('boilerplate words inside a real sentence are kept', () => {
+  const out = normalizeScript(
+    { body: 'We had a long discussion about this post and decided to subscribe to the idea.' },
+    { intro: false },
+  );
+  assert.match(out, /long discussion about this post/);
+});
+
 console.log(`\n✅ ${passed} tests passed\n`);

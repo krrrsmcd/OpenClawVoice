@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chunkText, stitchMp3 } from './tts.js';
+import { chunkText, stitchMp3, assertLossless } from './tts.js';
 
 let passed = 0;
 const test = (name, fn) => { fn(); passed++; console.log(`  ok  ${name}`); };
@@ -62,6 +62,64 @@ test('no text is lost (char count is preserved for word-split case)', () => {
   const rejoined = chunks.join(' ').split(/\s+/).sort().join(' ');
   const original = words.split(/\s+/).sort().join(' ');
   assert.equal(rejoined, original);
+});
+
+// --- silent-loss regressions ------------------------------------------------
+// The old sentence regex (/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) required terminal
+// punctuation to be followed by whitespace. Any period NOT followed by a space
+// caused String.match to skip forward, silently discarding text. Real articles
+// hit this whenever block elements get flattened without separators.
+
+const nonSpace = (s) => s.replace(/\s+/g, '');
+
+test('period with no following space does not drop text (regression)', () => {
+  // Forced over the cap so the sentence splitter actually runs.
+  const pad = 'Padding sentence to exceed the chunk cap. '.repeat(70);
+  const text = `${pad}A.B. C. Trailing sentence here.`;
+  const chunks = chunkText(text);
+  assert.ok(noneOver(chunks));
+  assert.equal(nonSpace(chunks.join(' ')), nonSpace(text));
+  assert.ok(chunks.join(' ').includes('A.B'), 'the "A.B" span must survive');
+});
+
+test('paragraphs glued together by a period survive chunking (real-world case)', () => {
+  const pad = 'Filler text that pushes this paragraph past the cap. '.repeat(55);
+  const text = `${pad}you have to get past the “magic” of AI.Context, domain experience, skill.`;
+  const chunks = chunkText(text);
+  assert.ok(noneOver(chunks));
+  assert.equal(nonSpace(chunks.join(' ')), nonSpace(text));
+  assert.match(chunks.join(' '), /magic” of AI/);
+  assert.match(chunks.join(' '), /Context, domain experience/);
+});
+
+test('lossless across randomized punctuation-heavy inputs', () => {
+  const fragments = [
+    'A normal sentence here.', 'No space after.This one follows.',
+    'Ellipsis in the middle... then more.', 'A question? Yes!', 'Dr. Smith went home.',
+    'Version 2.5 shipped.', 'Quote at end “like this.”', 'Bang!Immediately after.',
+    'A clause; then another.', 'Numbers 1.2.3 in a row.', 'Mixed?!Punctuation.',
+  ];
+  let seed = 42;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+
+  for (let n = 0; n < 200; n++) {
+    const count = 40 + Math.floor(rand() * 120);
+    const parts = Array.from({ length: count }, () => fragments[Math.floor(rand() * fragments.length)]);
+    // Mix paragraph breaks and plain spaces so both code paths get exercised.
+    const text = parts.map((p, i) => (i && rand() < 0.15 ? `\n\n${p}` : p)).join(' ');
+    const chunks = chunkText(text);
+    assert.ok(noneOver(chunks), `case ${n}: chunk over cap`);
+    assert.equal(nonSpace(chunks.join(' ')), nonSpace(text), `case ${n}: text lost`);
+  }
+});
+
+test('assertLossless throws when chunks are truncated', () => {
+  assert.throws(
+    () => assertLossless('one two three four', ['one two']),
+    /dropped text/,
+  );
+  // And stays quiet when only whitespace differs.
+  assert.doesNotThrow(() => assertLossless('one two\n\nthree', ['one two', 'three']));
 });
 
 test('stitchMp3 binary-concats multiple buffers in order', () => {
