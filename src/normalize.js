@@ -12,11 +12,13 @@ export function normalizeScript(article, opts = {}) {
   const { intro = true } = opts;
 
   let body = article.body || '';
-  body = stripMath(body);
+  body = speakMath(body);
   body = stripCitationMarkers(body);
   body = stripUrls(body);
   body = stripStandaloneBoilerplate(body);
+  body = flattenFormulaCase(body);
   body = speakSymbols(body);
+  body = capitalizeSentences(body);
   body = tidy(body);
   body = ensureParagraphPauses(body);
 
@@ -44,18 +46,128 @@ export function buildIntro({ title, author, siteName } = {}) {
 // --- cleaning rules --------------------------------------------------------
 
 /**
- * Remove LaTeX/MathJax expressions, which TTS reads out as literal backslash
- * soup ("backslash text open brace Success..."). Only unambiguous delimiters
- * are stripped: \(...\), \[...\], and $$...$$. Single-$ math is deliberately
- * left alone because it collides with ordinary prices ("$5 to $10").
+ * Turn LaTeX/MathJax expressions into spoken English. Left as-is, TTS reads
+ * them as literal backslash soup ("backslash text open brace Success...").
+ *
+ * Only unambiguous delimiters are handled: \(...\), \[...\] and $$...$$.
+ * Single-$ math is deliberately left alone because it collides with ordinary
+ * prices ("$5 to $10"). Anything we can't verbalize is dropped rather than
+ * narrated.
  */
-function stripMath(text) {
+export function speakMath(text) {
+  const say = (_m, inner) => {
+    const spoken = verbalizeLatex(inner);
+    return spoken ? ` ${spoken} ` : '';
+  };
   return text
-    .replace(/\\\((.|\n)*?\\\)/g, '')
-    .replace(/\\\[(.|\n)*?\\\]/g, '')
-    .replace(/\$\$(.|\n)*?\$\$/g, '')
+    .replace(/\\\(([\s\S]*?)\\\)/g, say)
+    .replace(/\\\[([\s\S]*?)\\\]/g, say)
+    .replace(/\$\$([\s\S]*?)\$\$/g, say)
     // Leftover bare commands if a delimiter was missing.
-    .replace(/\\(?:text|frac|mathrm|times|cdot)\b\s*/g, '');
+    .replace(/\\(?:text|mathrm)\s*\{([^{}]*)\}/g, '$1')
+    .replace(/\\(?:frac|times|cdot|left|right)\b\s*/g, '');
+}
+
+/**
+ * Convert a LaTeX fragment to a spoken sentence. Fractions are read using the
+ * article's own vocabulary ("the numerator is X, the denominator is Y"), which
+ * is clearer aloud than "over" and unambiguous about what sits above the line.
+ * Terms are lowercased so the voice reads them as prose rather than as a list
+ * of proper nouns, which is what made the delivery choppy.
+ */
+function verbalizeLatex(latex) {
+  let s = latex;
+
+  // \frac{A}{B} -> "the numerator is A. The denominator is B"
+  s = replaceFractions(s);
+
+  s = s
+    // Terms are lowercased so the voice reads them as prose, not as a list of
+    // proper nouns — that capitalisation is what made the delivery choppy.
+    .replace(/\\(?:text|mathrm)\s*\{([^{}]*)\}/g, (_m, body) => body.toLowerCase())
+    .replace(/\\times\b/g, ' times ')
+    .replace(/\\cdot\b/g, ' times ')
+    .replace(/\\div\b/g, ' divided by ')
+    .replace(/\\(?:left|right|,|;|!|quad|qquad)\b/g, '')
+    .replace(/\s*=\s*/g, ' equals the following. ')
+    .replace(/[{}\\]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // If anything unreadable survived, say nothing rather than narrate symbols.
+  if (!s || /[\\{}^_]/.test(s)) return '';
+
+  s = s.replace(/\s+([.,])/g, '$1');
+  if (!/[.!?]$/.test(s)) s += '.';
+  return capitalizeSentences(s);
+}
+
+/**
+ * Capitalize the first letter of each sentence. Applied after the formula
+ * lowercasing so that only the *interior* terms stay lowercase — a sentence
+ * still opens with a capital.
+ */
+function capitalizeSentences(s) {
+  return s.replace(/(^|\n|[.!?]["'”’)]?\s+)([a-z])/g, (_m, lead, ch) => lead + ch.toUpperCase());
+}
+
+/** Rewrite every \frac{A}{B}, matching braces so nested groups survive. */
+function replaceFractions(input) {
+  let s = input;
+  let guard = 0;
+  while (s.includes('\\frac') && guard++ < 20) {
+    const i = s.indexOf('\\frac');
+    const num = readGroup(s, i + '\\frac'.length);
+    if (!num) break;
+    const den = readGroup(s, num.end);
+    if (!den) break;
+    const spoken = `the numerator is ${num.body.trim()}. The denominator is ${den.body.trim()}`;
+    s = s.slice(0, i) + spoken + s.slice(den.end);
+  }
+  return s;
+}
+
+/** Read a {...} group starting at or after `from`, honouring nesting. */
+function readGroup(s, from) {
+  const start = s.indexOf('{', from);
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < s.length; i++) {
+    if (s[i] === '{') depth++;
+    else if (s[i] === '}' && --depth === 0) {
+      return { body: s.slice(start + 1, i), end: i + 1 };
+    }
+  }
+  return null;
+}
+
+// A standalone formula line: only words joined by ×, and short enough to be a
+// label rather than a sentence. The article's failure-mode headings look like
+// "Machine × No Problem Understanding × Practice" (7 words). The word-count cap
+// keeps ordinary prose that happens to contain × out of scope.
+const FORMULA_LINE = /^[A-Za-z][A-Za-z'’-]*(?: [A-Za-z][A-Za-z'’-]*)*(?: *[×✕✖] *[A-Za-z][A-Za-z'’-]*(?: [A-Za-z][A-Za-z'’-]*)*)+[.?!]?$/;
+const FORMULA_MAX_WORDS = 8;
+
+/**
+ * Lowercase the terms of a standalone formula line. "Machine Understanding
+ * times Problem Understanding" reads as a choppy list of proper nouns; the
+ * lowercase form flows as prose, with a much shorter beat after "times".
+ * Sentence case is restored afterwards by capitalizeSentences.
+ *
+ * Runs before speakSymbols so the × itself is the signal that a line is a
+ * formula — far more reliable than pattern-matching the word "times", which
+ * appears in ordinary prose ("three times Monday", "The New York Times").
+ */
+function flattenFormulaCase(text) {
+  return text
+    .split('\n')
+    .map((line) => {
+      const l = line.trim();
+      if (!FORMULA_LINE.test(l)) return line;
+      const words = l.replace(/[×✕✖]/g, ' ').trim().split(/\s+/).length;
+      return words <= FORMULA_MAX_WORDS ? l.toLowerCase() : line;
+    })
+    .join('\n');
 }
 
 /** Remove numbered citation markers like [1], [12], [3][4]. */

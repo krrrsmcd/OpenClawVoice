@@ -72,19 +72,33 @@ test('full article with intro reads cleanly end to end', () => {
 
 // --- math -------------------------------------------------------------------
 
-test('LaTeX expressions are stripped, not read aloud', () => {
+test('a LaTeX fraction is spoken as numerator and denominator', () => {
   const out = normalizeScript({
-    body: 'Here is the model.\n\n\\(\\text{Success} = \\frac{\\text{A}}{\\text{B}}\\)\n\nAnd the rest of it.',
+    body:
+      'Here is the model.\n\n' +
+      '\\(\\text{Success} = \\frac{\\text{Machine Understanding} \\times \\text{Problem Understanding}}{\\text{Social Contract}}\\)\n\n' +
+      'And the rest of it.',
   }, { intro: false });
-  assert.doesNotMatch(out, /\\text|\\frac|\\\(|\\\)/);
+
+  assert.doesNotMatch(out, /\\text|\\frac|\\\(|\\\)|[{}]/);
+  assert.match(out, /Success equals the following\./);
+  assert.match(out, /The numerator is machine understanding times problem understanding\./);
+  assert.match(out, /The denominator is social contract\./);
   assert.match(out, /Here is the model\./);
   assert.match(out, /And the rest of it\./);
 });
 
-test('display math with $$ is stripped', () => {
-  const out = normalizeScript({ body: 'Before.\n\n$$x = y + z$$\n\nAfter.' }, { intro: false });
-  assert.doesNotMatch(out, /\$\$|x = y/);
+test('unverbalizable math is dropped rather than read as symbols', () => {
+  const out = normalizeScript({ body: 'Before.\n\n\\(x^2 + \\beta_1\\)\n\nAfter.' }, { intro: false });
+  assert.doesNotMatch(out, /\^|_|beta|\\/);
   assert.match(out, /Before\./);
+  assert.match(out, /After\./);
+});
+
+test('display math with $$ is verbalized too', () => {
+  const out = normalizeScript({ body: 'Before.\n\n$$\\text{A} = \\text{B}$$\n\nAfter.' }, { intro: false });
+  assert.doesNotMatch(out, /\$\$/);
+  assert.match(out, /A equals the following\. B\./i);
 });
 
 test('ordinary prices are NOT mangled by the math rule', () => {
@@ -99,9 +113,27 @@ test('ordinary prices are NOT mangled by the math rule', () => {
 // --- symbols ----------------------------------------------------------------
 
 test('multiplication signs are spoken as words', () => {
-  const out = normalizeScript({ body: 'Machine × Problem × Practice is the numerator here.' }, { intro: false });
+  const out = normalizeScript({ body: 'The numerator is Machine × Problem × Practice in this model.' }, { intro: false });
   assert.match(out, /Machine times Problem times Practice/);
   assert.doesNotMatch(out, /×/);
+});
+
+test('a standalone formula line is lowercased so it flows', () => {
+  const out = normalizeScript(
+    { body: 'Machine × No Problem Understanding × Practice\nFast iteration in the wrong direction.' },
+    { intro: false },
+  );
+  // Sentence-initial capital kept; interior terms lowercased for a shorter beat.
+  assert.match(out, /^Machine times no problem understanding times practice\./m);
+});
+
+test('prose containing "times" is never lowercased', () => {
+  const out = normalizeScript(
+    { body: 'I told Bob three times Monday that The New York Times had covered it.' },
+    { intro: false },
+  );
+  assert.match(out, /I told Bob three times Monday/);
+  assert.match(out, /The New York Times/);
 });
 
 // --- pauses -----------------------------------------------------------------
@@ -111,7 +143,7 @@ test('a short label line gets terminal punctuation so TTS pauses', () => {
     { body: 'Machine × No Problem Understanding\nFast iteration in the wrong direction.' },
     { intro: false },
   );
-  assert.match(out, /Machine times No Problem Understanding\.\nFast iteration/);
+  assert.match(out, /Machine times no problem understanding\.\nFast iteration/);
 });
 
 test('a mid-sentence line wrap is left alone', () => {
