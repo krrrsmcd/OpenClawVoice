@@ -1,0 +1,48 @@
+#!/bin/sh
+# Pre-commit guard — blocks secrets and personal info from entering the repo.
+# Enable once with:  git config core.hooksPath .githooks
+
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 1) Never allow an env file (except the template) to be committed.
+for f in $staged; do
+  case "$f" in
+    .env.example) ;;
+    .env|.env.*|*/.env|*/.env.*)
+      echo "BLOCKED: '$f' is an env file and must not be committed."
+      echo "         Unstage it:  git restore --staged \"$f\""
+      fail=1
+      ;;
+  esac
+done
+
+# 2) Scan staged content for real credentials / URLs / personal paths.
+#    (Test fixtures like https://pub-abc.r2.dev are intentionally NOT matched —
+#     the pattern requires a real 32-hex bucket id.)
+patterns='pub-[0-9a-f]{32}\.r2\.dev|sk_[A-Za-z0-9]{20,}|/Users/[A-Za-z0-9._-]+/|[0-9a-f]{32}\.r2\.cloudflarestorage\.com'
+
+for f in $staged; do
+  case "$f" in
+    package-lock.json|*.png|*.jpg|*.mp3|*.m4a) continue ;;
+  esac
+  if git show ":$f" 2>/dev/null | grep -nEq "$patterns"; then
+    echo "BLOCKED: '$f' contains a real URL, API key, or personal path:"
+    git show ":$f" | grep -nE "$patterns" | head -3 | sed 's/^/         /'
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  cat <<'EOF'
+
+Commit aborted. Replace real values with placeholders, e.g.:
+  /absolute/path/to/openclaw-voice     instead of a real home path
+  https://pub-xxxx.r2.dev              instead of your real bucket URL
+Real values belong in .env (gitignored), never in tracked files.
+EOF
+  exit 1
+fi
+
+exit 0

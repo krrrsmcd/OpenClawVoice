@@ -1,0 +1,37 @@
+{
+  "name": "openclaw-voice",
+  "version": "0.1.0",
+  "description": "Message a URL to OpenClaw, get a narrated podcast episode in a private feed.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check-config": "node --env-file=.env src/checkConfig.js",
+    "tts": "node --env-file=.env src/synthesize.js",
+    "extract": "node src/extractUrl.js",
+    "normalize": "node src/normalizeUrl.js",
+    "convert": "node --env-file=.env src/convert.js",
+    "upload": "node --env-file=.env src/uploadFile.js",
+    "process": "node --env-file=.env src/processUrl.js",
+    "process-text": "node --env-file=.env src/processTextCli.js",
+    "cleanup": "node --env-file=.env src/cleanup.js",
+    "usage": "node src/usageReport.js",
+    "test": "node src/tts.test.js && node src/extract.test.js && node src/normalize.test.js && node src/pipeline.test.js && node src/storage.test.js && node src/feed.test.js && node src/process.test.js && node src/publish.test.js && node src/usage.test.js",
+    "test:tts": "node src/tts.test.js",
+    "test:extract": "node src/extract.test.js",
+    "test:normalize": "node src/normalize.test.js",
+    "test:pipeline": "node src/pipeline.test.js",
+    "test:storage": "node src/storage.test.js",
+    "test:feed": "node src/feed.test.js",
+    "test:process": "node src/process.test.js",
+    "test:publish": "node src/publish.test.js",
+    "test:usage": "node src/usage.test.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@mozilla/readability": "^0.5.0",
+    "jsdom": "^25.0.1"
+  },
+  "license": "MIT"
+}
